@@ -2,9 +2,9 @@
 
 ## 1. 目的
 
-「WEBマンガウォッチ」は、複数の公式WEB漫画サイトに掲載されている作品の新話公開をまとめて確認し、お気に入り作品の更新を見逃さないための一般公開Webサービスである。
+「WEBマンガウォッチ」は、複数の公式WEB漫画サイトに掲載されている作品の新話公開をひとまとめに確認できる一般公開Webサービスである。
 
-副次的に、作品名・作者名・掲載サイト名で作品を検索し、新しい作品を発見できるようにする。漫画本文や画像は保存・配信せず、各公式サイトへ誘導する。
+副次的に、作品名・作者名・掲載サイト名で作品を検索し、新しい作品を発見できるようにする。漫画本文や画像は保存・配信せず、各公式サイトへ誘導する。将来的には通知機能を追加し、更新の見逃し防止へ拡張する。
 
 ### MVP対象作品
 
@@ -43,10 +43,10 @@
 
 ## 3. 技術構成
 
-- フロントエンド：Next.js
-- ホスティング：Cloudflare Pages
+- フロントエンド：Next.js 16 + vinext
+- ホスティング・実行基盤：Cloudflare Workers
 - データベース：Supabase PostgreSQL
-- 定期処理：Supabase Edge Functions等のスケジュール実行
+- 定期処理：Supabase CronからEdge Functions等をスケジュール実行
 - 利用者識別：個人情報を含まないランダムな匿名ID Cookie
 - 開始時のプラン：Supabase Freeを基本とする
 
@@ -62,13 +62,23 @@
 - source_url
 - enabled
 - last_fetched_at
+- last_success_at
 - last_fetch_status
 - last_error
+- last_episode_count
+- consecutive_failures
+
+### Author
+
+- id
+- name
+- normalized_name
+- created_at
 
 ### Series
 
+- id
 - title
-- author_name
 - site_id
 - series_url
 - description
@@ -77,10 +87,17 @@
 - kindle_asin
 - paperback_asin
 
+### SeriesAuthor
+
+- series_id
+- author_id
+- role
+
 ### Episode
 
 - series_id
-- external_id または正規化済み公式URL
+- site_id
+- source_episode_key
 - title
 - episode_number（取得できる場合）
 - published_at
@@ -88,18 +105,33 @@
 - first_detected_at
 - is_promotional
 
+`source_episode_key` はサイトアダプターが生成する取得元固有の安定キーとし、`UNIQUE(site_id, source_episode_key)`で重複を防ぐ。URLは変更される可能性があるため、同一話の識別子そのものにはしない。
+
 ### AnonymousUser
 
 - anonymous_id_hash
 - created_at
 - last_seen_at
 
-### Follow
+### SeriesFollow
 
 - anonymous_user_id
-- target_type（series、author、site）
-- target_id
+- series_id
 - created_at
+
+### AuthorFollow
+
+- anonymous_user_id
+- author_id
+- created_at
+
+### SiteFollow
+
+- anonymous_user_id
+- site_id
+- created_at
+
+フォロー対象ごとにテーブルを分け、外部キーで参照整合性を保証する。
 
 ### ReadState
 
@@ -119,7 +151,8 @@
 7. PR、単行本告知、キャンペーン、投票、お知らせは本編更新から除外する。
 8. 公開終了した話は履歴から削除しない。
 9. 取得失敗時は既存データを変更せず、サイト単位でエラーを記録する。
-10. サイトへのアクセスは低頻度とし、利用規約・robots.txt・アクセス制限を尊重する。
+10. HTTP 200でも前回の話数から不自然に0件になった場合は異常と判定し、成功扱いにしない。
+11. サイトへのアクセスは低頻度とし、利用規約・robots.txt・アクセス制限を尊重する。
 
 ## 6. 利用者体験
 
@@ -128,7 +161,9 @@
 - 更新話への公式リンクをクリックした時点で既読にする。
 - 既読話には手動で未読へ戻す操作を用意する。
 - Cookie削除、別ブラウザ、別端末では状態を引き継がない。
+- 180日間アクセスがない匿名利用者のフォロー・既読データは削除対象とする。
 - 将来ログインを追加する場合は、匿名データをアカウントへ移行できる構造にする。
+- 既読化リクエストは`navigator.sendBeacon`または`fetch(..., { keepalive: true })`で送信し、公式ページへの遷移でリクエストが失われにくくする。
 
 ## 7. Amazonアフィリエイト
 
@@ -169,6 +204,8 @@ Amazonの利用規約・プログラムポリシーに従い、商品画像・�
 - CookieにSecure、HttpOnly、SameSite等の適切な属性を設定する
 - 漫画本文・画像を保存しない
 - 取得エラーと最終成功日時を記録する
+- 前回話数、今回話数、連続失敗回数を記録する
+- HTTP 200でも話数0件などの異常を検知する
 - 規約・プライバシー・アフィリエイト開示を公開する
 
 ### 事前に確認する
@@ -210,4 +247,4 @@ Lint：npm run lint
 ## 13. サービス名称
 
 - サービス名：WEBマンガウォッチ
-- サブタイトル：お気に入り作品の更新を見逃さない
+- サブタイトル：読んでいるWEBマンガの更新を、ひとまとめに。
